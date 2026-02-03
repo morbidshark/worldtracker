@@ -51,7 +51,7 @@
     </div>
     <div id="loading">Loading globe...</div>
 
-    <script src="//unpkg.com/globe.gl"></script>
+    <script src="https://cdn.jsdelivr.net/npm/globe.gl@2.31.0"></script>
     <script>
         console.log('Globe.gl loaded:', typeof Globe);
 
@@ -92,7 +92,7 @@
                     })
                     .polygonSideColor(() => 'rgba(202, 210, 197, 0.3)')
                     .polygonStrokeColor(() => '#555555')
-                    .polygonAltitude(0)
+                    .polygonAltitude(0.001)
                     .polygonLabel(({ properties: d }) => `
                         <div style="background: rgba(0,0,0,0.9); padding: 10px; border-radius: 5px; font-size: 14px;">
                             <b>${d.ADMIN || d.NAME}</b>
