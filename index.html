@@ -51,239 +51,90 @@
     </div>
     <div id="loading">Loading globe...</div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="//unpkg.com/globe.gl"></script>
     <script>
-        console.log('Three.js loaded:', typeof THREE);
+        console.log('Globe.gl loaded:', typeof Globe);
 
         const loading = document.getElementById('loading');
         const visitedCountries = new Set();
         let autoRotate = true;
-        let countryMeshes = [];
+        let myGlobe;
 
-        // Scene setup
-        const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x2f3e46);
+        // Create a solid color image URL for the ocean
+        const canvas = document.createElement('canvas');
+        canvas.width = 1;
+        canvas.height = 1;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#2f3e46';
+        ctx.fillRect(0, 0, 1, 1);
+        const oceanImageUrl = canvas.toDataURL();
 
-        // Camera
-        const camera = new THREE.PerspectiveCamera(
-            45,
-            window.innerWidth / window.innerHeight,
-            0.1,
-            1000
-        );
-        camera.position.z = 300;
+        // Initialize Globe
+        myGlobe = Globe()
+            (document.body)
+            .globeImageUrl(oceanImageUrl)
+            .backgroundColor('#2f3e46')
+            .width(window.innerWidth)
+            .height(window.innerHeight)
+            .showAtmosphere(false);
 
-        // Renderer
-        const renderer = new THREE.WebGLRenderer({ antialias: true });
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        document.body.appendChild(renderer.domElement);
-
-        // Create ocean globe
-        const globeGeometry = new THREE.SphereGeometry(100, 64, 64);
-        const globeMaterial = new THREE.MeshPhongMaterial({
-            color: 0x2f3e46,
-            emissive: 0x1a1a2e,
-            shininess: 5
-        });
-        const globe = new THREE.Mesh(globeGeometry, globeMaterial);
-        scene.add(globe);
-
-        // Lighting
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
-        scene.add(ambientLight);
-
-        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-        directionalLight.position.set(200, 100, 200);
-        scene.add(directionalLight);
-
-        // Raycaster for click detection
-        const raycaster = new THREE.Raycaster();
-        const mouse = new THREE.Vector2();
-
-        // Load country borders and create clickable meshes
+        // Load countries
         fetch('https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_admin_0_countries.geojson')
             .then(res => res.json())
-            .then(data => {
-                console.log('Countries loaded:', data.features.length);
+            .then(countries => {
+                console.log('Countries loaded:', countries.features.length);
+                
+                myGlobe
+                    .polygonsData(countries.features)
+                    .polygonCapColor(feat => {
+                        const countryName = feat.properties.ADMIN || feat.properties.NAME;
+                        return visitedCountries.has(countryName) ? '#84a98c' : '#cad2c5';
+                    })
+                    .polygonSideColor(() => 'rgba(202, 210, 197, 0.3)')
+                    .polygonStrokeColor(() => '#555555')
+                    .polygonAltitude(0.01)
+                    .polygonLabel(({ properties: d }) => `
+                        <div style="background: rgba(0,0,0,0.9); padding: 10px; border-radius: 5px; font-size: 14px;">
+                            <b>${d.ADMIN || d.NAME}</b>
+                        </div>
+                    `)
+                    .onPolygonClick((polygon) => {
+                        const countryName = polygon.properties.ADMIN || polygon.properties.NAME;
+                        
+                        if (visitedCountries.has(countryName)) {
+                            visitedCountries.delete(countryName);
+                            console.log('Unmarked:', countryName);
+                        } else {
+                            visitedCountries.add(countryName);
+                            console.log('Marked as visited:', countryName);
+                        }
+                        
+                        // Re-render polygons with updated colors
+                        myGlobe.polygonsData(countries.features);
+                    });
 
-                data.features.forEach(feature => {
-                    const coords = feature.geometry.coordinates;
-                    const type = feature.geometry.type;
-                    const countryName = feature.properties.ADMIN || feature.properties.NAME;
+                // Auto-rotate controls
+                myGlobe.controls().autoRotate = true;
+                myGlobe.controls().autoRotateSpeed = 0.5;
 
-                    const latLonToVector3 = (lon, lat, radius) => {
-                        const phi = (90 - lat) * (Math.PI / 180);
-                        const theta = (lon + 180) * (Math.PI / 180);
-                        const x = -radius * Math.sin(phi) * Math.cos(theta);
-                        const y = radius * Math.cos(phi);
-                        const z = radius * Math.sin(phi) * Math.sin(theta);
-                        return new THREE.Vector3(x, y, z);
-                    };
-
-                    const createCountryMesh = (polygonCoords) => {
-                        polygonCoords.forEach(ring => {
-                            if (ring.length < 3) return;
-
-                            // Create border line
-                            const points = ring.map(([lon, lat]) => 
-                                latLonToVector3(lon, lat, 100.5)
-                            );
-
-                            if (points.length > 1) {
-                                const geometry = new THREE.BufferGeometry().setFromPoints(points);
-                                const material = new THREE.LineBasicMaterial({
-                                    color: 0x555555,
-                                    linewidth: 1
-                                });
-                                const line = new THREE.Line(geometry, material);
-                                globe.add(line);
-                            }
-
-                            // Create clickable mesh for the country
-                            const vertices = [];
-                            ring.forEach(([lon, lat]) => {
-                                const vec = latLonToVector3(lon, lat, 100.2);
-                                vertices.push(vec.x, vec.y, vec.z);
-                            });
-
-                            if (vertices.length >= 9) {
-                                const meshGeometry = new THREE.BufferGeometry();
-                                meshGeometry.setAttribute('position', 
-                                    new THREE.Float32BufferAttribute(vertices, 3)
-                                );
-
-                                const meshMaterial = new THREE.MeshBasicMaterial({
-                                    color: 0xcad2c5,
-                                    side: THREE.DoubleSide,
-                                    transparent: true,
-                                    opacity: 0.8
-                                });
-
-                                const mesh = new THREE.Mesh(meshGeometry, meshMaterial);
-                                mesh.userData.countryName = countryName;
-                                mesh.userData.defaultColor = 0xcad2c5;
-                                mesh.userData.visitedColor = 0x84a98c;
-                                
-                                countryMeshes.push(mesh);
-                                globe.add(mesh);
-                            }
-                        });
-                    };
-
-                    if (type === 'Polygon') {
-                        createCountryMesh(coords);
-                    } else if (type === 'MultiPolygon') {
-                        coords.forEach(polygon => createCountryMesh(polygon));
-                    }
+                // Stop auto-rotate on user interaction
+                const controls = myGlobe.controls();
+                controls.addEventListener('start', () => {
+                    autoRotate = false;
+                    controls.autoRotate = false;
                 });
 
                 loading.style.display = 'none';
-                console.log('Countries rendered:', countryMeshes.length);
             })
             .catch(err => {
                 console.error('Error:', err);
                 loading.textContent = 'Error loading countries';
             });
 
-        // Mouse interaction
-        let isDragging = false;
-        let previousMousePosition = { x: 0, y: 0 };
-
-        renderer.domElement.addEventListener('mousedown', (e) => {
-            isDragging = true;
-            autoRotate = false;
-            previousMousePosition = { x: e.clientX, y: e.clientY };
-        });
-
-        renderer.domElement.addEventListener('mousemove', (e) => {
-            if (!isDragging) return;
-
-            const deltaX = e.clientX - previousMousePosition.x;
-            const deltaY = e.clientY - previousMousePosition.y;
-
-            globe.rotation.y += deltaX * 0.005;
-            globe.rotation.x += deltaY * 0.005;
-
-            previousMousePosition = { x: e.clientX, y: e.clientY };
-        });
-
-        renderer.domElement.addEventListener('mouseup', () => {
-            isDragging = false;
-        });
-
-        // Click detection for countries
-        renderer.domElement.addEventListener('click', (event) => {
-            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
-
-            raycaster.setFromCamera(mouse, camera);
-            const intersects = raycaster.intersectObjects(countryMeshes);
-
-            if (intersects.length > 0) {
-                const clickedMesh = intersects[0].object;
-                const countryName = clickedMesh.userData.countryName;
-
-                if (visitedCountries.has(countryName)) {
-                    visitedCountries.delete(countryName);
-                    clickedMesh.material.color.setHex(clickedMesh.userData.defaultColor);
-                    console.log('Unmarked:', countryName);
-                } else {
-                    visitedCountries.add(countryName);
-                    clickedMesh.material.color.setHex(clickedMesh.userData.visitedColor);
-                    console.log('Marked as visited:', countryName);
-                }
-            }
-        });
-
-        // Touch support
-        renderer.domElement.addEventListener('touchstart', (e) => {
-            isDragging = true;
-            autoRotate = false;
-            previousMousePosition = {
-                x: e.touches[0].clientX,
-                y: e.touches[0].clientY
-            };
-        });
-
-        renderer.domElement.addEventListener('touchmove', (e) => {
-            if (!isDragging) return;
-            e.preventDefault();
-
-            const deltaX = e.touches[0].clientX - previousMousePosition.x;
-            const deltaY = e.touches[0].clientY - previousMousePosition.y;
-
-            globe.rotation.y += deltaX * 0.005;
-            globe.rotation.x += deltaY * 0.005;
-
-            previousMousePosition = {
-                x: e.touches[0].clientX,
-                y: e.touches[0].clientY
-            };
-        });
-
-        renderer.domElement.addEventListener('touchend', () => {
-            isDragging = false;
-        });
-
         // Window resize
         window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
+            myGlobe.width(window.innerWidth).height(window.innerHeight);
         });
-
-        // Animation loop
-        function animate() {
-            requestAnimationFrame(animate);
-            
-            // Auto-rotation only if user hasn't interacted
-            if (autoRotate && !isDragging) {
-                globe.rotation.y += 0.001;
-            }
-
-            renderer.render(scene, camera);
-        }
-        animate();
     </script>
 </body>
 </html>
