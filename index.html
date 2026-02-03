@@ -85,20 +85,20 @@
                 console.log('Countries loaded:', countries.features.length);
                 
                 myGlobe
-                    .polygonsData(countries.features)
-                    .polygonCapColor(feat => {
+                    .hexPolygonsData(countries.features)
+                    .hexPolygonResolution(3)
+                    .hexPolygonMargin(0.2)
+                    .hexPolygonColor(feat => {
                         const countryName = feat.properties.ADMIN || feat.properties.NAME;
                         return visitedCountries.has(countryName) ? '#84a98c' : '#cad2c5';
                     })
-                    .polygonSideColor(() => 'rgba(202, 210, 197, 0.3)')
-                    .polygonStrokeColor(() => '#555555')
-                    .polygonAltitude(0.05)
-                    .polygonLabel(({ properties: d }) => `
+                    .hexPolygonAltitude(0)
+                    .hexPolygonLabel(({ properties: d }) => `
                         <div style="background: rgba(0,0,0,0.9); padding: 10px; border-radius: 5px; font-size: 14px;">
                             <b>${d.ADMIN || d.NAME}</b>
                         </div>
                     `)
-                    .onPolygonClick((polygon) => {
+                    .onHexPolygonClick((polygon) => {
                         const countryName = polygon.properties.ADMIN || polygon.properties.NAME;
                         
                         if (visitedCountries.has(countryName)) {
@@ -110,7 +110,7 @@
                         }
                         
                         // Re-render polygons with updated colors
-                        myGlobe.polygonsData(countries.features);
+                        myGlobe.hexPolygonsData(countries.features);
                     });
 
                 // Auto-rotate controls
