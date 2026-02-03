@@ -9,7 +9,7 @@
             margin: 0;
             padding: 0;
             font-family: Arial, sans-serif;
-            background-color: #0a0a0a;
+            background-color: #2f3e46;
             color: white;
             overflow: hidden;
         }
@@ -27,7 +27,7 @@
         }
         p {
             margin: 0;
-            color: #999;
+            color: #cad2c5;
             font-size: 0.9rem;
         }
         #loading {
@@ -40,13 +40,14 @@
         }
         canvas {
             display: block;
+            cursor: pointer;
         }
     </style>
 </head>
 <body>
     <div id="header">
         <h1>🌍 Travel Tracker Globe</h1>
-        <p>Drag to rotate • All countries shown in grey</p>
+        <p>Click countries to mark as visited • Drag to rotate</p>
     </div>
     <div id="loading">Loading globe...</div>
 
@@ -55,10 +56,13 @@
         console.log('Three.js loaded:', typeof THREE);
 
         const loading = document.getElementById('loading');
+        const visitedCountries = new Set();
+        let autoRotate = true;
+        let countryMeshes = [];
 
         // Scene setup
         const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x0a0a0a);
+        scene.background = new THREE.Color(0x2f3e46);
 
         // Camera
         const camera = new THREE.PerspectiveCamera(
@@ -74,10 +78,10 @@
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(renderer.domElement);
 
-        // Create globe
+        // Create ocean globe
         const globeGeometry = new THREE.SphereGeometry(100, 64, 64);
         const globeMaterial = new THREE.MeshPhongMaterial({
-            color: 0x2a2a3e,
+            color: 0x2f3e46,
             emissive: 0x1a1a2e,
             shininess: 5
         });
@@ -85,14 +89,18 @@
         scene.add(globe);
 
         // Lighting
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
         scene.add(ambientLight);
 
         const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
         directionalLight.position.set(200, 100, 200);
         scene.add(directionalLight);
 
-        // Load country borders
+        // Raycaster for click detection
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+
+        // Load country borders and create clickable meshes
         fetch('https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_admin_0_countries.geojson')
             .then(res => res.json())
             .then(data => {
@@ -101,6 +109,7 @@
                 data.features.forEach(feature => {
                     const coords = feature.geometry.coordinates;
                     const type = feature.geometry.type;
+                    const countryName = feature.properties.ADMIN || feature.properties.NAME;
 
                     const latLonToVector3 = (lon, lat, radius) => {
                         const phi = (90 - lat) * (Math.PI / 180);
@@ -111,8 +120,11 @@
                         return new THREE.Vector3(x, y, z);
                     };
 
-                    const drawPolygon = (polygonCoords) => {
+                    const createCountryMesh = (polygonCoords) => {
                         polygonCoords.forEach(ring => {
+                            if (ring.length < 3) return;
+
+                            // Create border line
                             const points = ring.map(([lon, lat]) => 
                                 latLonToVector3(lon, lat, 100.5)
                             );
@@ -120,24 +132,53 @@
                             if (points.length > 1) {
                                 const geometry = new THREE.BufferGeometry().setFromPoints(points);
                                 const material = new THREE.LineBasicMaterial({
-                                    color: 0xaaaaaa,
+                                    color: 0x555555,
                                     linewidth: 1
                                 });
                                 const line = new THREE.Line(geometry, material);
                                 globe.add(line);
                             }
+
+                            // Create clickable mesh for the country
+                            const vertices = [];
+                            ring.forEach(([lon, lat]) => {
+                                const vec = latLonToVector3(lon, lat, 100.2);
+                                vertices.push(vec.x, vec.y, vec.z);
+                            });
+
+                            if (vertices.length >= 9) {
+                                const meshGeometry = new THREE.BufferGeometry();
+                                meshGeometry.setAttribute('position', 
+                                    new THREE.Float32BufferAttribute(vertices, 3)
+                                );
+
+                                const meshMaterial = new THREE.MeshBasicMaterial({
+                                    color: 0xcad2c5,
+                                    side: THREE.DoubleSide,
+                                    transparent: true,
+                                    opacity: 0.8
+                                });
+
+                                const mesh = new THREE.Mesh(meshGeometry, meshMaterial);
+                                mesh.userData.countryName = countryName;
+                                mesh.userData.defaultColor = 0xcad2c5;
+                                mesh.userData.visitedColor = 0x84a98c;
+                                
+                                countryMeshes.push(mesh);
+                                globe.add(mesh);
+                            }
                         });
                     };
 
                     if (type === 'Polygon') {
-                        drawPolygon(coords);
+                        createCountryMesh(coords);
                     } else if (type === 'MultiPolygon') {
-                        coords.forEach(polygon => drawPolygon(polygon));
+                        coords.forEach(polygon => createCountryMesh(polygon));
                     }
                 });
 
                 loading.style.display = 'none';
-                console.log('Borders rendered');
+                console.log('Countries rendered:', countryMeshes.length);
             })
             .catch(err => {
                 console.error('Error:', err);
@@ -150,6 +191,7 @@
 
         renderer.domElement.addEventListener('mousedown', (e) => {
             isDragging = true;
+            autoRotate = false;
             previousMousePosition = { x: e.clientX, y: e.clientY };
         });
 
@@ -169,9 +211,34 @@
             isDragging = false;
         });
 
+        // Click detection for countries
+        renderer.domElement.addEventListener('click', (event) => {
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(countryMeshes);
+
+            if (intersects.length > 0) {
+                const clickedMesh = intersects[0].object;
+                const countryName = clickedMesh.userData.countryName;
+
+                if (visitedCountries.has(countryName)) {
+                    visitedCountries.delete(countryName);
+                    clickedMesh.material.color.setHex(clickedMesh.userData.defaultColor);
+                    console.log('Unmarked:', countryName);
+                } else {
+                    visitedCountries.add(countryName);
+                    clickedMesh.material.color.setHex(clickedMesh.userData.visitedColor);
+                    console.log('Marked as visited:', countryName);
+                }
+            }
+        });
+
         // Touch support
         renderer.domElement.addEventListener('touchstart', (e) => {
             isDragging = true;
+            autoRotate = false;
             previousMousePosition = {
                 x: e.touches[0].clientX,
                 y: e.touches[0].clientY
@@ -209,8 +276,8 @@
         function animate() {
             requestAnimationFrame(animate);
             
-            // Gentle auto-rotation when not dragging
-            if (!isDragging) {
+            // Auto-rotation only if user hasn't interacted
+            if (autoRotate && !isDragging) {
                 globe.rotation.y += 0.001;
             }
 
